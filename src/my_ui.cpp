@@ -7,11 +7,6 @@ static lv_obj_t *lbl_hr;
 static lv_obj_t *lbl_batt;
 static lv_obj_t *lbl_steps;
 
-// Schiphol Board Objects
-static lv_obj_t *lbl_flight_time;
-static lv_obj_t *lbl_flight_dest;
-static lv_obj_t *lbl_flight_status;
-
 // Clock Hands
 static lv_obj_t *hour_hand;
 static lv_obj_t *min_hand;
@@ -31,20 +26,6 @@ static lv_point_t sec_points[2];
 static int val_hr = 72;
 static int val_steps = 1000;
 static int val_batt = 100;
-
-// Flight Data
-typedef struct {
-  const char *time;
-  const char *dest;
-  const char *status;
-} flight_info_t;
-
-static const flight_info_t flights[] = {{"10:00", "TOKYO", "DELAYED"},
-                                        {"10:15", "LONDON", "BOARDING"},
-                                        {"10:30", "PARIS", "ON TIME"},
-                                        {"11:00", "N.YORK", "GATE OPEN"},
-                                        {"11:45", "BERLIN", "CANCELLED"}};
-static int flight_idx = 0;
 
 // Navigation Event Callback
 static void dashboard_nav_cb(lv_event_t *e) {
@@ -108,15 +89,6 @@ static void clock_timer_cb(lv_timer_t *timer) {
       val_batt--;
     lv_label_set_text_fmt(lbl_batt, "#00FF00 \xEF\x89\x80# %d%%", val_batt);
   }
-}
-
-// Timer callback for Schiphol Board (Every 5 seconds)
-static void schiphol_timer_cb(lv_timer_t *timer) {
-  flight_idx = (flight_idx + 1) % 5;
-
-  lv_label_set_text(lbl_flight_time, flights[flight_idx].time);
-  lv_label_set_text(lbl_flight_dest, flights[flight_idx].dest);
-  lv_label_set_text(lbl_flight_status, flights[flight_idx].status);
 }
 
 // Helper to create a data widget
@@ -184,53 +156,44 @@ static void create_dashboard(lv_obj_t *parent) {
   lv_timer_create(clock_timer_cb, 50, NULL);
 }
 
-static void create_schiphol_board(lv_obj_t *parent) {
-  // Schiphol Yellow Background
-  lv_obj_set_style_bg_color(parent, lv_color_hex(0xF3CA00), 0);
+// Slider Event Callback
+static void slider_event_cb(lv_event_t *e) {
+  lv_obj_t *slider = lv_event_get_target(e);
+  int val = (int)lv_slider_get_value(slider);
+
+  // Call main.cpp function to update brightness
+  update_user_brightness(val);
+}
+
+static void create_settings_screen(lv_obj_t *parent) {
+  // Background
+  lv_obj_set_style_bg_color(parent, lv_color_hex(0x202020), 0);
   lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
 
-  // Title "DEPARTURES"
+  // Title "Settings"
   lv_obj_t *title = lv_label_create(parent);
-  lv_label_set_text(title, "DEPARTURES");
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0); // Large Font
-  lv_obj_set_style_text_color(title, lv_color_black(), 0);
+  lv_label_set_text(title, "Settings");
+  lv_obj_set_style_text_color(title, lv_color_white(), 0);
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
 
-  // Container for Flight Info (Black Box)
-  lv_obj_t *cont = lv_obj_create(parent);
-  lv_obj_set_size(cont, 220, 160);
-  lv_obj_align(cont, LV_ALIGN_CENTER, 0, 20);
-  lv_obj_set_style_bg_color(cont, lv_color_black(), 0);
-  lv_obj_set_style_radius(cont, 4, 0);
-  lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+  // Brightness Slider
+  lv_obj_t *slider = lv_slider_create(parent);
+  lv_obj_set_width(slider, 180);
+  lv_obj_center(slider);
+  lv_slider_set_range(slider, 10, 255);          // Min 10 to prevent blackout
+  lv_slider_set_value(slider, 255, LV_ANIM_OFF); // Default max
+  lv_obj_add_event_cb(slider, slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-  // Styles for Text
-  static lv_style_t style_text;
-  lv_style_init(&style_text);
-  lv_style_set_text_color(&style_text, lv_color_hex(0xF3CA00)); // Yellow text
-  lv_style_set_text_font(&style_text,
-                         &lv_font_montserrat_28); // Large Font (FIXED: 2 args)
+  // Label "Brightness"
+  lv_obj_t *lbl = lv_label_create(parent);
+  lv_label_set_text(lbl, "Backlight Brightness");
+  lv_obj_set_style_text_color(lbl, lv_color_hex(0xAAAAAA), 0);
+  lv_obj_align_to(lbl, slider, LV_ALIGN_OUT_TOP_MID, 0, -10);
 
-  // Flight Time
-  lbl_flight_time = lv_label_create(cont);
-  lv_obj_add_style(lbl_flight_time, &style_text, 0);
-  lv_label_set_text(lbl_flight_time, flights[0].time);
-  lv_obj_align(lbl_flight_time, LV_ALIGN_TOP_LEFT, 0, 0);
-
-  // Flight Dest
-  lbl_flight_dest = lv_label_create(cont);
-  lv_obj_add_style(lbl_flight_dest, &style_text, 0);
-  lv_label_set_text(lbl_flight_dest, flights[0].dest);
-  lv_obj_align(lbl_flight_dest, LV_ALIGN_LEFT_MID, 0, 0);
-
-  // Flight Status
-  lbl_flight_status = lv_label_create(cont);
-  lv_obj_add_style(lbl_flight_status, &style_text, 0);
-  lv_label_set_text(lbl_flight_status, flights[0].status);
-  lv_obj_align(lbl_flight_status, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-
-  // Timer for rotation
-  lv_timer_create(schiphol_timer_cb, 5000, NULL);
+  // Icon
+  lv_obj_t *icon = lv_label_create(parent);
+  lv_label_set_text(icon, "\xEF\x80\x84"); // Use heart or sun icon if available
+  lv_obj_align_to(icon, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
 }
 
 void my_ui_init(void) {
@@ -241,9 +204,9 @@ void my_ui_init(void) {
   lv_obj_t *tile_center = lv_tileview_add_tile(tv, 1, 1, LV_DIR_ALL);
   create_dashboard(tile_center);
 
-  // Tile 2: Top (Schiphol Board)
+  // Tile 2: Top (Settings)
   lv_obj_t *tile_top = lv_tileview_add_tile(tv, 1, 0, LV_DIR_BOTTOM);
-  create_schiphol_board(tile_top);
+  create_settings_screen(tile_top);
 
   // Tile 3: Bottom (Steps Details)
   lv_obj_t *tile_bottom = lv_tileview_add_tile(tv, 1, 2, LV_DIR_TOP);

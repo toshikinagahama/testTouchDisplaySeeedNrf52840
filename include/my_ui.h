@@ -6,4 +6,7 @@
 
 void my_ui_init(void);
 
+// Call these from UI
+extern void update_user_brightness(int val);
+
 #endif

@@ -13,6 +13,13 @@
 #define TOUCH_INT D7 // ディスプレイの仕様に合わせて確認してください
 #define TOUCH_RST D6 // ディスプレイの仕様に合わせて確認してください
 
+// Backlight Pin (User confirmed D2)
+#define BACKLIGHT_PIN D2
+
+// Backlight Polarity (Change to LOW if inverted)
+#define BL_ON HIGH
+#define BL_OFF LOW
+
 CST816S touch(TOUCH_SDA, TOUCH_SCL, TOUCH_RST, TOUCH_INT);
 
 /*Don't forget to set Sketchbook location in File/Preferences to the path of
@@ -27,6 +34,67 @@ static lv_color_t buf1[screenWidth * screenHeight];
 // static lv_color_t buf2[screenWidth * screenHeight / 2];
 
 TFT_eSPI tft = TFT_eSPI(screenWidth, screenHeight); /* TFT instance */
+
+// Backlight State
+static bool is_display_on = true;
+static uint32_t last_touch_time = 0;
+static uint32_t display_wake_time = 0; // Tracks when display turned ON
+static int target_brightness = 255;    // Default max brightness
+static int current_brightness = 255;
+
+// Helper to set PWM directly
+void set_raw_brightness(int val) {
+  if (BL_ON == LOW)
+    val = 255 - val; // Invert control if needed
+  analogWrite(BACKLIGHT_PIN, val);
+
+  // Store localized brightness (regardless of hardware inversion)
+  if (BL_ON == LOW)
+    current_brightness = 255 - val;
+  else
+    current_brightness = val;
+}
+
+// Helper to fade backlight
+void fade_backlight(bool in) {
+  int start = current_brightness;
+  int end = in ? target_brightness : 0;
+  int step = (start < end) ? 10 : -10; // Faster fade (snappy)
+
+  // Simple blocking fade
+  while (abs(current_brightness - end) > 10) {
+    current_brightness += step;
+    set_raw_brightness(current_brightness);
+    delay(5);
+  }
+  set_raw_brightness(end);
+}
+
+// Function called from UI to update brightness setting
+void update_user_brightness(int val) {
+  target_brightness = val;
+  if (is_display_on) {
+    set_raw_brightness(target_brightness);
+  }
+}
+
+void set_display_state(bool on) {
+  if (is_display_on == on)
+    return;
+  is_display_on = on;
+
+  if (on) {
+    display_wake_time = millis(); // Record wake time
+    tft.writecommand(0x11);       // Sleep Out
+    tft.writecommand(0x29);       // Display ON
+    delay(10);                    // Wait for TFT to wake
+    fade_backlight(true);         // Fade IN
+  } else {
+    fade_backlight(false);  // Fade OUT
+    tft.writecommand(0x28); // Display OFF
+    tft.writecommand(0x10); // Sleep In
+  }
+}
 
 #if LV_USE_LOG != 0
 /* Serial debugging */
@@ -74,6 +142,12 @@ void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data) {
     data->point.x = touch.data.x;
     data->point.y = touch.data.y;
 
+    // Activity detected
+    last_touch_time = millis();
+    if (!is_display_on) {
+      set_display_state(true); // Wake up immediately
+    }
+
     // デバッグ用
     // Serial.printf("Touch: x=%d, y=%d\n", touch.data.x, touch.data.y);
   } else {
@@ -87,6 +161,13 @@ void setup() {
 
   pinMode(D4, INPUT_PULLUP);
   pinMode(D5, INPUT_PULLUP);
+
+  // Backlight Init (PWM)
+  pinMode(BACKLIGHT_PIN, OUTPUT);
+  set_raw_brightness(target_brightness); // Start ON
+  last_touch_time = millis();
+  display_wake_time = millis(); // Initial wake time
+
   delay(10);
   Wire.begin();
   Wire.setClock(100000); // 100kHz（標準速度）で開始
@@ -137,6 +218,8 @@ void setup() {
   my_ui_init(); // Initialize new Swipe UI & Clock
 
   Serial.println("Setup done");
+  last_touch_time = millis(); // Initialize timer
+
   // I2Cピンを明示的に入力プルアップに設定（Wire.beginの前に実行）
 
   // // I2Cスキャナー（setup内に追加）
@@ -161,5 +244,15 @@ void loop() {
   lastTick = current;
 
   lv_timer_handler(); /* let the GUI do its work */
+
+  // Auto Display Off Logic
+  if (is_display_on) {
+    // Turn off IF inactivity > 10s AND minimum ON duration > 10s
+    if ((current - last_touch_time > 10000) &&
+        (current - display_wake_time > 10000)) {
+      set_display_state(false);
+    }
+  }
+
   delay(5);
 }
